@@ -228,7 +228,7 @@ diff --git a/src/cmd/cgo/out.go b/src/cmd/cgo/out.go
 --- a/src/cmd/cgo/out.go
 +++ b/src/cmd/cgo/out.go
 @@ -512,7 +512,7 @@
- 
+
  	// Gcc wrapper unpacks the C argument struct
  	// and calls the actual C function.
 -	fmt.Fprintf(fgcc, "void\n")
@@ -253,7 +253,7 @@ diff --git a/src/pkg/runtime/asm_amd64.s b/src/pkg/runtime/asm_amd64.s
 +++ b/src/pkg/runtime/asm_amd64.s
 @@ -88,7 +88,8 @@
  	CALL	runtime·schedinit(SB)
- 
+
  	// create a new goroutine to start program
 -	PUSHQ	$runtime·main·f(SB)		// entry
 +	MOVQ	$runtime·main·f(SB),AX
@@ -262,14 +262,14 @@ diff --git a/src/pkg/runtime/asm_amd64.s b/src/pkg/runtime/asm_amd64.s
  	ARGSIZE(16)
  	CALL	runtime·newproc(SB)
 @@ -246,7 +247,8 @@
- 	
+
  	// Save our own state as the PC and SP to restore
  	// if this goroutine needs to be restarted.
 -	MOVQ	$runtime·newstackcall(SB), (g_sched+gobuf_pc)(AX)
 +	MOVQ	$runtime·newstackcall(SB), DX
 +	MOVQ	DX, (g_sched+gobuf_pc)(AX)
  	MOVQ	SP, (g_sched+gobuf_sp)(AX)
- 
+
  	// Set up morestack arguments to call f on a new stack.
 @@ -878,7 +880,8 @@
  	// a page boundary, so we can load it directly.
@@ -294,7 +294,7 @@ diff --git a/src/pkg/runtime/asm_amd64.s b/src/pkg/runtime/asm_amd64.s
 @@ -1221,6 +1225,11 @@
  	LEAQ	-1(CX)(AX*2), AX	// 1,0,-1 result
  	RET
- 
+
 +TEXT runtime·lib_init(SB),NOSPLIT,$-8
 +	MOVQ    _cgo_lib_init(SB), AX
 +	CALL	AX
@@ -309,12 +309,12 @@ diff --git a/src/pkg/runtime/asm_arm.s b/src/pkg/runtime/asm_arm.s
 @@ -648,6 +648,10 @@
  	MOVW	R1, g
  	B		runtime·save_gm(SB)
- 
+
 +TEXT runtime·lib_init(SB),NOSPLIT,$0
 +	MOVW    _cgo_lib_init(SB), R4
 +	BL		(R4)
 +	RET
- 
+
  // TODO: share code with memeq?
  TEXT bytes·Equal(SB),NOSPLIT,$0
 diff --git a/src/pkg/runtime/cgo/gcc_sharedlib_linux.c b/src/pkg/runtime/cgo/gcc_sharedlib_linux.c
@@ -457,7 +457,7 @@ diff --git a/src/pkg/runtime/cgo/libcgo.h b/src/pkg/runtime/cgo/libcgo.h
 +++ b/src/pkg/runtime/cgo/libcgo.h
 @@ -38,6 +38,16 @@
  };
- 
+
  /*
 + * Initializes the runtime in shared library mode (OS, arch dependent)
 + */
@@ -504,7 +504,7 @@ diff --git a/src/pkg/runtime/os_linux_arm.c b/src/pkg/runtime/os_linux_arm.c
 +++ b/src/pkg/runtime/os_linux_arm.c
 @@ -34,13 +34,88 @@
  }
- 
+
  #pragma textflag NOSPLIT
 -void
 -runtime·setup_auxv(int32 argc, byte **argv)
@@ -532,7 +532,7 @@ diff --git a/src/pkg/runtime/os_linux_arm.c b/src/pkg/runtime/os_linux_arm.c
 +		break;
 +	}
 +}
-+	
++
 +static uint8 *vfp = (uint8*)"vfpv3";
 +
 +#pragma textflag NOSPLIT
@@ -552,7 +552,7 @@ diff --git a/src/pkg/runtime/os_linux_arm.c b/src/pkg/runtime/os_linux_arm.c
 +			if(idx >= 3) {
 +				runtime·hwcap |= HWCAP_VFP;
 +			}
-+			if(idx == 5) { 
++			if(idx == 5) {
 +				runtime·hwcap |= HWCAP_VFPv3;
 +				goto done;
 +			} else {
@@ -592,12 +592,12 @@ diff --git a/src/pkg/runtime/os_linux_arm.c b/src/pkg/runtime/os_linux_arm.c
 -	byte *rnd;
  	uint32 *auxv;
 -	uint32 t;
- 
+
  	// skip envp to get to ELF auxiliary vector.
  	for(envp = &argv[argc+1]; *envp != nil; envp++)
 @@ -48,28 +123,21 @@
  	envp++;
- 	
+
  	for(auxv=(uint32*)envp; auxv[0] != AT_NULL; auxv += 2) {
 -		switch(auxv[0]) {
 -		case AT_RANDOM: // kernel provided 16-byte worth of random data
@@ -620,7 +620,7 @@ diff --git a/src/pkg/runtime/os_linux_arm.c b/src/pkg/runtime/os_linux_arm.c
 +		parse_auxv_entry(auxv[0], auxv[1]);
  	}
  }
- 
+
  #pragma textflag NOSPLIT
 +void
 +runtime·setup_auxv(int32 argc, byte **argv)
@@ -647,9 +647,9 @@ diff --git a/src/pkg/runtime/proc.c b/src/pkg/runtime/proc.c
  G	runtime·g0;	 // idle goroutine for m0
  G*	runtime·allg;
 @@ -169,6 +170,17 @@
- 
+
  static FuncVal initDone = { runtime·unlockOSThread };
- 
+
 +// Initalize runtime in shared library mode
 +extern void runtime·lib_init(void);
 +
@@ -657,7 +657,7 @@ diff --git a/src/pkg/runtime/proc.c b/src/pkg/runtime/proc.c
 +void *_cgo_lib_init;
 +// _cgo_lib_setup is called in library mode to hand cgo the runtime entry point
 +void *_cgo_lib_setup;
-+// _cgo_lib_init_done is used is used by the runtime in shared library mode to 
++// _cgo_lib_init_done is used is used by the runtime in shared library mode to
 +// signal that runtime initialization is done.
 +void (*_cgo_lib_init_done)(void*);
 +
@@ -666,7 +666,7 @@ diff --git a/src/pkg/runtime/proc.c b/src/pkg/runtime/proc.c
  runtime·main(void)
 @@ -213,6 +225,15 @@
  	runtime·unlockOSThread();
- 
+
  	main·main();
 +	if(runtime·islibrary) {
 +		// Allocate extra m now, because the foreign main program might call into Go
@@ -679,10 +679,10 @@ diff --git a/src/pkg/runtime/proc.c b/src/pkg/runtime/proc.c
 +
  	if(raceenabled)
  		runtime·racefini();
- 
+
 @@ -697,11 +718,15 @@
  	M *mp;
- 
+
  	if(runtime·needextram) {
 -		// Can happen if C/C++ code calls Go from a global ctor.
 -		// Can not throw, because scheduler is not initialized yet.
@@ -699,7 +699,7 @@ diff --git a/src/pkg/runtime/proc.c b/src/pkg/runtime/proc.c
 +			runtime·exit(1);
 +		}
  	}
- 
+
  	// Lock extra list, take head, unlock popped list.
 diff --git a/src/pkg/runtime/rt0_linux_amd64.s b/src/pkg/runtime/rt0_linux_amd64.s
 --- a/src/pkg/runtime/rt0_linux_amd64.s
@@ -720,7 +720,7 @@ diff --git a/src/pkg/runtime/rt0_linux_arm.s b/src/pkg/runtime/rt0_linux_arm.s
 @@ -89,3 +89,8 @@
  	MOVW	$_rt0_arm_linux1(SB), R4
  	B		(R4)
- 
+
 +TEXT _rt0_arm_linux_lib(SB),NOSPLIT,$0
 +	MOVW    $_rt0_arm_linux1(SB), R0
 +	MOVW    _cgo_lib_setup(SB), R3
@@ -731,10 +731,10 @@ diff --git a/src/pkg/runtime/runtime.c b/src/pkg/runtime/runtime.c
 +++ b/src/pkg/runtime/runtime.c
 @@ -76,6 +76,7 @@
  Slice syscall·envs;
- 
+
  void (*runtime·sysargs)(int32, uint8**);
 +uint8** (*_cgo_getenviron)(void);
- 
+
  void
  runtime·args(int32 c, uint8 **v)
 @@ -117,13 +118,22 @@
@@ -742,7 +742,7 @@ diff --git a/src/pkg/runtime/runtime.c b/src/pkg/runtime/runtime.c
  	String *s;
  	int32 i, n;
 +	uint8** environ;
- 
+
 -	for(n=0; argv[argc+1+n] != 0; n++)
 +	environ = nil;
 +	if(argc > 0) {
@@ -754,7 +754,7 @@ diff --git a/src/pkg/runtime/runtime.c b/src/pkg/runtime/runtime.c
 +
 +	for(n=0; environ[n] != nil; n++)
  		;
- 
+
  	s = runtime·malloc(n*sizeof s[0]);
  	for(i=0; i<n; i++)
 -		s[i] = runtime·gostringnocopy(argv[argc+1+i]);
@@ -790,21 +790,21 @@ diff --git a/src/pkg/runtime/softfloat_arm.c b/src/pkg/runtime/softfloat_arm.c
 +			runtime·printf("*** cpu R[%d] += PC\n", 11);
 +		return 1;
 +	}
- 
+
  	goto stage1;
- 
+
 diff --git a/src/pkg/runtime/vdso_linux_amd64.c b/src/pkg/runtime/vdso_linux_amd64.c
 --- a/src/pkg/runtime/vdso_linux_amd64.c
 +++ b/src/pkg/runtime/vdso_linux_amd64.c
 @@ -299,10 +299,26 @@
  }
- 
+
  static void
 -runtime·linux_setup_vdso(int32 argc, uint8** argv)
 -{
 +parse_auxv_entry(uint64 type, uint64 val) {
  	struct vdso_info vdso_info;
- 
+
 +	if(type == AT_SYSINFO_EHDR) {
 +		if(val == 0) {
 +			// Something went wrong
@@ -827,7 +827,7 @@ diff --git a/src/pkg/runtime/vdso_linux_amd64.c b/src/pkg/runtime/vdso_linux_amd
  	p = &p[argc+1];
 @@ -317,21 +333,32 @@
  	Elf64_auxv_t *elf_auxv = (Elf64_auxv_t*) p;
- 
+
  	for(int32 i=0; elf_auxv[i].a_type!=AT_NULL; i++) {
 -		if(elf_auxv[i].a_type == AT_SYSINFO_EHDR) {
 -			if(elf_auxv[i].a_un.a_val == 0) {
@@ -846,7 +846,7 @@ diff --git a/src/pkg/runtime/vdso_linux_amd64.c b/src/pkg/runtime/vdso_linux_amd
 +		parse_auxv_entry(elf_auxv[i].a_type, elf_auxv[i].a_un.a_val);
  	}
  }
- 
+
 -void (*runtime·sysargs)(int32, uint8**) = runtime·linux_setup_vdso;
 +static void
 +parse_auxv_from_proc(void)
@@ -878,7 +878,7 @@ diff --git a/src/run.bash b/src/run.bash
 +++ b/src/run.bash
 @@ -135,6 +135,20 @@
  ) || exit $?
- 
+
  [ "$CGO_ENABLED" != 1 ] ||
 +(xcd ../misc/cgo/testshared
 +set -e
@@ -897,3 +897,60 @@ diff --git a/src/run.bash b/src/run.bash
  [ "$GOHOSTOS" == windows ] ||
  (xcd ../misc/cgo/testso
  ./test.bash || exit 1
+diff -r 87dea3f5ebe7 src/pkg/net/dnsconfig_android.go
+--- /dev/null	Thu Jan 01 00:00:00 1970 +0000
++++ b/src/pkg/net/dnsconfig_android.go	Thu Dec 19 17:34:24 2013 +0100
+@@ -0,0 +1,53 @@
++// Copyright 2009 The Go Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style
++// license that can be found in the LICENSE file.
++
++// +build android,linux
++
++package net
++
++import (
++	"fmt"
++	"os/exec"
++)
++
++type dnsConfig struct {
++	servers	[]string // servers to use
++	search	 []string // suffixes to append to local name
++	ndots		int			// number of dots in name to trigger absolute lookup
++	timeout	int			// seconds before giving up on packet
++	attempts int			// lost packets before giving up on server
++	rotate	 bool		 // round robin among servers
++}
++
++// Using getprop since Android doesn't have resolv.conf
++func dnsReadConfig() (*dnsConfig, error) {
++	conf := new(dnsConfig)
++	conf.servers = make([]string, 3)[0:0] // small, but the standard limit
++	conf.search = make([]string, 0)
++	conf.ndots = 1
++	conf.timeout = 5
++	conf.attempts = 2
++	conf.rotate = false
++	var ip string
++
++	for i := 1; i <= 4; i++ {
++		out, err := exec.Command("/system/bin/getprop", fmt.Sprintf("net.dns%v", i)).Output()
++		m := len(out)
++		if err != nil {
++			continue
++		}
++		if m < 2 {
++			continue
++		}
++		ip = string(out[:m-1])
++
++		a := conf.servers
++		n := len(a)
++		a = a[0 : n+1]
++		a[n] = ip
++		conf.servers = a
++	}
++
++	return conf, nil
++}
